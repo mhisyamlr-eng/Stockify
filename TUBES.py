@@ -1,408 +1,336 @@
-"""
-Inventory app (Streamlit) - Stockify Pro (Enhanced)
-Features:
-- Styled UI with CSS variables matching provided palette
-- Image upload / camera capture per item, image preview
-- Add / Edit / Delete item
-- Inline quick actions for qty +/-
-- Export / Import CSV (images saved to ./images and base64 stored in CSV)
-- Persist to local file (data/inventory.csv)
-- Mobile-first elements: camera input, large buttons
-- Placeholder for barcode scanning integration (commented)
-
-How to run:
-    pip install streamlit pandas pillow
-    streamlit run inventory_app_streamlit.py
-
-Note: this is a self-contained single-file app intended for demo and local use.
-For production: use a proper database, background sync, and barcode scanning service.
-"""
+# TUBES.py - Streamlit Revised
+# Jalankan: streamlit run TUBES.py
 
 import streamlit as st
-import pandas as pd
-import os
+from PIL import Image, ImageDraw, ImageFont
 import io
+import pandas as pd
+import numpy as np
 import base64
-from PIL import Image
+import uuid
 from datetime import datetime
 
-# ---------------------------
-# Config & Paths
-# ---------------------------
-DATA_DIR = "data"
-IMAGES_DIR = os.path.join(DATA_DIR, "images")
-DATA_FILE = os.path.join(DATA_DIR, "inventory.csv")
-os.makedirs(IMAGES_DIR, exist_ok=True)
-os.makedirs(DATA_DIR, exist_ok=True)
+# -----------------------
+# Helper: Default avatar sketsa (PIL)
+# -----------------------
+def generate_default_avatar(size=256):
+    img = Image.new("RGB", (size, size), (245, 247, 251))
+    draw = ImageDraw.Draw(img)
+    # head
+    cx, cy = size//2, size//2 - 16
+    r = size//4
+    draw.ellipse((cx-r, cy-r, cx+r, cy+r), fill=(230,230,230), outline=(200,200,200))
+    # body rectangle
+    bx1, by1 = cx - r - 12, cy + r - 6
+    bx2, by2 = cx + r + 12, cy + r + 80
+    draw.rectangle((bx1, by1, bx2, by2), fill=(230,230,230))
+    # simple face: eyes & smile
+    draw.ellipse((cx-30, cy-10, cx-20, cy), fill=(180,180,180))
+    draw.ellipse((cx+20, cy-10, cx+30, cy), fill=(180,180,180))
+    draw.arc((cx-20, cy+5, cx+20, cy+30), start=0, end=180, fill=(160,160,160), width=3)
+    return img
 
-st.set_page_config(page_title="Stockify Pro — Inventory", layout="wide")
+def pil_image_to_bytes(img, fmt="PNG"):
+    buf = io.BytesIO()
+    img.save(buf, format=fmt)
+    buf.seek(0)
+    return buf.read()
 
-# ---------------------------
-# Theme tokens (CSS)
-# ---------------------------
-THEME_CSS = """
-:root{
-  --bg: #F5F7FB;
-  --card-bg: #FFFFFF;
-  --text-primary: #1F2937;
-  --text-muted: #8A97B2;
-  --primary: #0B66FF;
-  --primary-600: #0856D6;
-  --secondary: #0BB39A;
-  --warning: #FFB020;
-  --danger: #FF4D4F;
-  --shadow: rgba(11,102,255,0.08);
-}
+# -----------------------
+# Session state initialization
+# -----------------------
+def init_state():
+    if "items" not in st.session_state:
+        st.session_state["items"] = []  # list of dicts: {id, name, qty, image_bytes, created_at}
+    if "profile_img" not in st.session_state:
+        st.session_state["profile_img"] = pil_image_to_bytes(generate_default_avatar(256))
+    if "form_item_name" not in st.session_state:
+        st.session_state["form_item_name"] = ""
+    if "form_item_qty" not in st.session_state:
+        st.session_state["form_item_qty"] = 1
+    if "form_item_image" not in st.session_state:
+        st.session_state["form_item_image"] = None
+    if "filter_text" not in st.session_state:
+        st.session_state["filter_text"] = ""
 
-/* page */
-.app-bg{ background: var(--bg); padding: 18px 22px; }
-.container{ max-width: 1200px; margin: 0 auto; }
-.header{ display:flex; align-items:center; gap:16px; }
-.brand{ font-weight:700; font-size:20px; color:var(--primary); }
+init_state()
 
-.card{ background:var(--card-bg); border-radius:12px; border:1px solid #E8EEF8; padding:16px; box-shadow: 0 6px 18px var(--shadow); }
-.btn-primary{ background:var(--primary); color:white; padding:8px 14px; border-radius:10px; border:none; cursor:pointer; }
-.btn-primary:hover{ background:var(--primary-600); }
-.small{ font-size:13px; color:var(--text-muted); }
-.item-card{ display:flex; gap:12px; align-items:center; padding:10px; border-radius:10px; }
-.thumbnail{ width:84px; height:84px; object-fit:cover; border-radius:8px; border:1px solid #E8EEF8; }
-.badge-warning{ background:var(--warning); color:white; padding:4px 8px; border-radius:8px; font-weight:600; }
-.chips{ display:flex; gap:8px; align-items:center; }
-.quick-action{ border:none; background:transparent; cursor:pointer; }
-
-/* responsive */
-@media (max-width:600px){
-  .container{ padding: 0 8px; }
-  .thumbnail{ width:68px; height:68px }
-}
-"""
-
-# inject CSS
-st.markdown(f"<style>{THEME_CSS}</style>", unsafe_allow_html=True)
-
-# ---------------------------
-# Helpers: persistence + images
-# ---------------------------
-
-def load_inventory():
-    if os.path.exists(DATA_FILE):
-        try:
-            df = pd.read_csv(DATA_FILE)
-            # ensure columns
-            expected = ["id","name","qty","category","location","notes","image_path","created_at"]
-            for c in expected:
-                if c not in df.columns:
-                    df[c] = ""
-            return df
-        except Exception as e:
-            st.error(f"Gagal membaca data: {e}")
-            return pd.DataFrame(columns=["id","name","qty","category","location","notes","image_path","created_at"])
-    else:
-        return pd.DataFrame(columns=["id","name","qty","category","location","notes","image_path","created_at"])
-
-
-def save_inventory(df: pd.DataFrame):
-    df.to_csv(DATA_FILE, index=False)
-
-
-def save_image_file(image_bytes, filename=None):
-    """Save bytes to images folder and return relative path"""
-    if image_bytes is None:
-        return ""
-    if filename is None:
-        filename = f"img_{datetime.now().strftime('%Y%m%d%H%M%S%f')}.png"
-    path = os.path.join(IMAGES_DIR, filename)
-    with open(path, "wb") as f:
-        f.write(image_bytes)
-    return path
-
-
-def pil_to_bytes(img: Image.Image, fmt='PNG'):
-    b = io.BytesIO()
-    img.save(b, format=fmt)
-    return b.getvalue()
-
-
-def image_to_base64(path):
-    try:
-        with open(path, "rb") as f:
-            return base64.b64encode(f.read()).decode('utf-8')
-    except Exception:
-        return ""
-
-# ---------------------------
-# Streamlit Session state
-# ---------------------------
-if "inventory_df" not in st.session_state:
-    st.session_state.inventory_df = load_inventory()
-
-# utility ID generator
-def next_id():
-    df = st.session_state.inventory_df
-    if df.empty:
-        return 1
-    else:
-        try:
-            return int(df["id"].max()) + 1
-        except Exception:
-            return len(df) + 1
-
-# CRUD functions (always operate on session_state)
-def add_item(name, qty, category, location, notes, image_bytes=None):
-    df = st.session_state.inventory_df
-    _id = next_id()
-    image_path = ""
-    if image_bytes:
-        image_path = save_image_file(image_bytes)
-    new = {
-        "id": _id,
-        "name": name,
-        "qty": int(qty),
-        "category": category or "",
-        "location": location or "",
-        "notes": notes or "",
-        "image_path": image_path,
-        "created_at": datetime.now().isoformat()
+# -----------------------
+# CSS: inject styles (not printed as text)
+# -----------------------
+def inject_css():
+    css = """
+    <style>
+    :root{
+      --bg: #F5F7FB;
+      --card-bg: #FFFFFF;
+      --text-primary: #1F2937;
+      --text-muted: #8A97B2;
+      --primary: #0B66FF;
+      --primary-600: #0856D6;
+      --secondary: #0BB39A;
+      --warning: #FFB020;
+      --danger: #FF4D4F;
+      --shadow: rgba(11,102,255,0.06);
     }
-    df = pd.concat([df, pd.DataFrame([new])], ignore_index=True)
-    st.session_state.inventory_df = df
-    save_inventory(df)
-    return _id
+    .app-container { background: var(--bg); padding: 18px 22px; }
+    .brand { font-weight:700; font-size:20px; color:var(--primary); }
+    .card { background:var(--card-bg); border-radius:12px; border:1px solid #E8EEF8; padding:16px; box-shadow:0 6px 18px var(--shadow); }
+    .btn-primary { background:var(--primary); color:white; padding:8px 14px; border-radius:10px; border:none; cursor:pointer; }
+    .small { font-size:13px; color:var(--text-muted); }
+    .thumbnail { width:84px; height:84px; object-fit:cover; border-radius:8px; border:1px solid #E8EEF8; }
+    .badge-warning { background:var(--warning); color:white; padding:4px 8px; border-radius:8px; font-weight:600; }
+    /* responsive helpers */
+    @media (max-width:600px){ .thumbnail{ width:68px; height:68px } }
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
 
+inject_css()
 
-def update_item(item_id, **kwargs):
-    df = st.session_state.inventory_df
-    idx = df.index[df["id"] == item_id].tolist()
-    if not idx:
-        return False
-    i = idx[0]
-    for k, v in kwargs.items():
-        if k == "image_bytes" and v is not None:
-            path = save_image_file(v)
-            df.at[i, "image_path"] = path
-        elif k in df.columns:
-            df.at[i, k] = v
-    st.session_state.inventory_df = df
-    save_inventory(df)
-    return True
+# -----------------------
+# Utility functions
+# -----------------------
+def add_item(name: str, qty: int, image_bytes: bytes):
+    item = {
+        "id": str(uuid.uuid4()),
+        "name": name.strip(),
+        "qty": int(qty),
+        "image": image_bytes,
+        "created_at": datetime.utcnow()
+    }
+    st.session_state["items"].append(item)
+    return item
 
+def delete_item(item_id: str):
+    st.session_state["items"] = [it for it in st.session_state["items"] if it["id"] != item_id]
 
-def delete_item(item_id):
-    df = st.session_state.inventory_df
-    df = df[df["id"] != item_id].reset_index(drop=True)
-    st.session_state.inventory_df = df
-    save_inventory(df)
-    return True
+def get_items_filtered(filter_text: str = ""):
+    if not filter_text:
+        return st.session_state["items"]
+    ft = filter_text.lower()
+    return [it for it in st.session_state["items"] if ft in it["name"].lower()]
 
-# quick in-place qty adjust
-def adjust_qty(item_id, delta):
-    df = st.session_state.inventory_df
-    idx = df.index[df["id"] == item_id].tolist()
-    if not idx:
-        return False
-    i = idx[0]
-    new_qty = int(df.at[i, "qty"]) + int(delta)
-    if new_qty < 0:
-        new_qty = 0
-    df.at[i, "qty"] = new_qty
-    st.session_state.inventory_df = df
-    save_inventory(df)
-    return True
+# -----------------------
+# Layout: Sidebar navigation
+# -----------------------
+st.set_page_config(page_title="Stockify Pro - Revised", layout="wide")
+with st.sidebar:
+    st.image(Image.open(io.BytesIO(st.session_state["profile_img"])), width=84, caption="Profil")
+    st.markdown("<div class='brand'>Stockify Pro</div>", unsafe_allow_html=True)
+    st.write("Inventory & Stock management")
+    st.write("---")
+    page = st.radio("Menu", ["Dashboard", "Scan & Add", "Items", "Reports", "Settings"])
 
-# ---------------------------
-# UI - Layout
-# ---------------------------
+# -----------------------
+# Page: Dashboard
+# -----------------------
+if page == "Dashboard":
+    st.title("Dashboard")
+    items = st.session_state["items"]
+    total_skus = len(items)
+    total_qty = sum(it["qty"] for it in items)
+    low_stock = [it for it in items if it["qty"] <= 2]  # threshold demo
 
-st.markdown('<div class="app-bg"><div class="container">', unsafe_allow_html=True)
-col1, col2 = st.columns([1,3])
-with col1:
-    st.markdown('<div class="card" style="text-align:left">', unsafe_allow_html=True)
-    st.markdown('<div style="display:flex;align-items:center;gap:12px"><img src="data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 48 48\" width=\"36\" height=\"36\"><rect width=\"48\" height=\"48\" fill=\"%230B66FF\" rx=\"8\"/></svg>" style="border-radius:8px"/> <div style="line-height:1"><div class="brand">Stockify Pro</div><div class="small">Inventory & Stock management</div></div></div>', unsafe_allow_html=True)
-    st.markdown('<hr/>', unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1,1,1])
+    col1.metric("Total SKUs", total_skus)
+    col2.metric("Total Quantity", total_qty)
+    col3.metric("Low Stock", len(low_stock))
 
-    page = st.radio("Menu", ["Dashboard","Scan & Add","Items","Reports","Settings"], index=0)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-with col2:
-    if page == "Dashboard":
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<h3 style="margin:0">Dashboard</h3>', unsafe_allow_html=True)
-        df = st.session_state.inventory_df
-        total_skus = len(df)
-        total_qty = int(df['qty'].sum()) if not df.empty else 0
-        low_stock = df[df['qty'] <= 2] if not df.empty else pd.DataFrame()
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total SKUs", total_skus)
-        c2.metric("Total Quantity", total_qty)
-        c3.metric("Low Stock", len(low_stock))
-        st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
-        # quick action widgets
-        ra, rb, rc = st.columns([2,1,1])
-        with ra:
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.markdown('<b>Low stock items</b>', unsafe_allow_html=True)
-            for _, r in low_stock.iterrows():
-                img_html = ''
-                if r.get('image_path'):
-                    rel = r['image_path']
-                    if os.path.exists(rel):
-                        b64 = base64.b64encode(open(rel,'rb').read()).decode()
-                        img_html = f'<img src="data:image/png;base64,{b64}" style="width:36px;height:36px;border-radius:6px;object-fit:cover;margin-right:8px;" />'
-                st.markdown(f'<div style="display:flex;align-items:center;gap:12px;padding:6px 0">{img_html}<div><b>{r["name"]}</b><div class="small">Qty: {r["qty"]}</div></div><div style="margin-left:auto"><span class="badge-warning">Reorder</span></div></div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-        with rb:
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.markdown('<b>Quick actions</b>', unsafe_allow_html=True)
-            if st.button('Import CSV'):
-                uploaded = st.file_uploader('Choose CSV', type=['csv'], key='import_csv')
-                if uploaded:
-                    newdf = pd.read_csv(uploaded)
-                    st.session_state.inventory_df = pd.concat([st.session_state.inventory_df, newdf], ignore_index=True)
-                    save_inventory(st.session_state.inventory_df)
-                    st.success('Imported')
-            if st.button('Export CSV'):
-                csv = st.session_state.inventory_df.to_csv(index=False).encode('utf-8')
-                st.download_button('Download CSV', data=csv, file_name='inventory_export.csv')
-            st.markdown('</div>', unsafe_allow_html=True)
-        with rc:
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.markdown('<b>Scan</b>', unsafe_allow_html=True)
-            st.markdown('<div class="small">Quick open camera for mobile</div>', unsafe_allow_html=True)
-            cam = st.button('Open Camera')
-            st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    elif page == "Scan & Add":
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<h3 style="margin:0">Scan & Add Item</h3>', unsafe_allow_html=True)
-        st.markdown('<div class="small">Gunakan kamera untuk foto barang atau upload foto. (Placeholder untuk barcode scanning)</div>', unsafe_allow_html=True)
-        with st.form('add_form'):
-            cols = st.columns([2,1])
-            with cols[0]:
-                name = st.text_input('Nama Barang')
-                category = st.text_input('Kategori')
-                location = st.text_input('Lokasi')
-                notes = st.text_area('Catatan')
-            with cols[1]:
-                qty = st.number_input('Kuantitas', min_value=0, value=1, step=1)
-                st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
-                img_camera = st.camera_input('Ambil foto (kamera)')
-                img_file = st.file_uploader('Atau upload gambar', type=['png','jpg','jpeg'])
-            submitted = st.form_submit_button('Tambah Barang')
-            if submitted:
-                image_bytes = None
-                if img_file is not None:
-                    image_bytes = img_file.read()
-                elif img_camera is not None:
-                    image_bytes = img_camera.read()
-                item_id = add_item(name, qty, category, location, notes, image_bytes)
-                st.success(f'Barang {name} ditambahkan (ID {item_id})')
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    elif page == "Items":
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<h3 style="margin:0">Items</h3>', unsafe_allow_html=True)
-        df = st.session_state.inventory_df
-        q = st.text_input('Cari (nama, kategori, lokasi)', key='search')
-        if q:
-            mask = df['name'].astype(str).str.contains(q, case=False) | df['category'].astype(str).str.contains(q, case=False) | df['location'].astype(str).str.contains(q, case=False)
-            df_view = df[mask]
+    st.write("")
+    st.markdown("#### Low stock items")
+    for it in low_stock:
+        cols = st.columns([0.12, 0.6, 0.28])
+        # thumbnail
+        if it["image"]:
+            img = Image.open(io.BytesIO(it["image"]))
+            cols[0].image(img, width=64)
         else:
-            df_view = df
-        st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
-        # list items as cards
-        for _, row in df_view.sort_values(by='name').iterrows():
-            id_ = row['id']
-            name = row['name']
-            qty = int(row['qty']) if row['qty'] != '' else 0
-            cat = row['category']
-            loc = row['location']
-            img_html = ''
-            if row['image_path'] and os.path.exists(row['image_path']):
-                b64 = base64.b64encode(open(row['image_path'],'rb').read()).decode()
-                img_html = f'<img class="thumbnail" src="data:image/png;base64,{b64}"/>'
+            cols[0].image(generate_default_avatar(64), width=64)
+        cols[1].markdown(f"**{it['name']}**\n\nQty: {it['qty']}")
+        cols[2].button("Reorder", key=f"reorder-{it['id']}")
+
+    st.write("---")
+    st.markdown("<div class='card'>Last 5 items added</div>", unsafe_allow_html=True)
+    for it in sorted(items, key=lambda x: x["created_at"], reverse=True)[:5]:
+        cols = st.columns([0.12, 0.6, 0.28])
+        if it["image"]:
+            cols[0].image(Image.open(io.BytesIO(it["image"])), width=64)
+        else:
+            cols[0].image(generate_default_avatar(64), width=64)
+        cols[1].markdown(f"**{it['name']}**\n\nAdded: {it['created_at'].strftime('%Y-%m-%d %H:%M:%S')}")
+        cols[2].markdown(f"Qty: **{it['qty']}**")
+
+# -----------------------
+# Page: Scan & Add
+# -----------------------
+elif page == "Scan & Add":
+    st.title("Scan & Add Item")
+    st.markdown("Gunakan form ini untuk menambahkan item. Setelah submit, kolom akan kosong kembali agar siap input item selanjutnya.")
+
+    with st.form("add_item_form", clear_on_submit=False):
+        c1, c2 = st.columns([3,1])
+        name = c1.text_input("Nama Barang", value=st.session_state["form_item_name"], key="form_name_input")
+        qty = c2.number_input("Qty", min_value=0, value=st.session_state["form_item_qty"], step=1, key="form_qty_input")
+        image_file = st.file_uploader("Foto (opsional)", type=["png","jpg","jpeg"], key="form_image_uploader")
+        submitted = st.form_submit_button("Submit Item")
+
+        # Jika submit ditekan
+        if submitted:
+            # proses image bytes
+            image_bytes = None
+            if image_file is not None:
+                image_bytes = image_file.read()
             else:
-                # placeholder
-                svg = '<svg width="84" height="84" xmlns="http://www.w3.org/2000/svg"><rect width="84" height="84" rx="8" fill="#F0F4FF"/></svg>'
-                img_html = f'<div style="width:84px;height:84px;border-radius:8px;background:#F0F4FF;display:flex;align-items:center;justify-content:center">📦</div>'
-            st.markdown(f'<div class="card item-card"><div>{img_html}</div><div style="flex:1"><b style="color:var(--text-primary)">{name}</b><div class="small">{cat} • {loc}</div></div><div style="display:flex;align-items:center;gap:8px"><div style="text-align:center"><div style="font-weight:700">{qty}</div><div class="small">in stock</div></div><div style="display:flex;flex-direction:column;gap:6px;margin-left:8px">', unsafe_allow_html=True)
-            # quick action buttons
-            c1, c2, c3 = st.columns([1,1,1])
-            # because we are inside loop, use unique keys
-            if st.button('＋', key=f'add_{id_}'):
-                adjust_qty(id_, 1)
-                st.experimental_rerun()
-            if st.button('−', key=f'rem_{id_}'):
-                adjust_qty(id_, -1)
-                st.experimental_rerun()
-            if st.button('Detail', key=f'det_{id_}'):
-                # open detail modal (simple implementation: show below)
-                st.markdown('<hr/>', unsafe_allow_html=True)
-                st.markdown('<div class="card">', unsafe_allow_html=True)
-                st.markdown(f'<h4>{name} — Detail</h4>', unsafe_allow_html=True)
-                cols = st.columns([2,1])
-                with cols[0]:
-                    st.text_input('Nama', value=name, key=f'edit_name_{id_}')
-                    st.text_input('Kategori', value=cat, key=f'edit_cat_{id_}')
-                    st.text_input('Lokasi', value=loc, key=f'edit_loc_{id_}')
-                    st.text_area('Notes', value=row['notes'], key=f'edit_notes_{id_}')
-                with cols[1]:
-                    if row['image_path'] and os.path.exists(row['image_path']):
-                        st.image(row['image_path'], width=220)
-                    else:
-                        st.info('Tidak ada gambar')
-                    img_new = st.file_uploader('Ganti / Unggah gambar', key=f'upd_img_{id_}')
-                    new_qty = st.number_input('Qty', min_value=0, value=qty, key=f'edit_qty_{id_}')
-                    if st.button('Simpan perubahan', key=f'save_{id_}'):
-                        img_bytes = img_new.read() if img_new else None
-                        update_item(id_, name=st.session_state.get(f'edit_name_{id_}'), qty=new_qty, category=st.session_state.get(f'edit_cat_{id_}'), location=st.session_state.get(f'edit_loc_{id_}'), notes=st.session_state.get(f'edit_notes_{id_}'), image_bytes=img_bytes)
-                        st.success('Tersimpan')
-                        st.experimental_rerun()
-                    if st.button('Hapus barang', key=f'del_{id_}'):
-                        delete_item(id_)
-                        st.success('Terhapus')
-                        st.experimental_rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-            st.markdown('</div></div></div>', unsafe_allow_html=True)
+                # optional: set default blank thumbnail or None
+                image_bytes = pil_image_to_bytes(generate_default_avatar(256))
 
-        st.markdown('</div>', unsafe_allow_html=True)
+            # Validasi sederhana
+            if not name or name.strip() == "":
+                st.warning("Nama barang tidak boleh kosong.")
+            else:
+                add_item(name, qty, image_bytes)
+                st.success(f"Item '{name}' (qty: {qty}) berhasil ditambahkan.")
+                # reset form fields di session_state agar input kosong lagi
+                st.session_state["form_name_input"] = ""
+                st.session_state["form_qty_input"] = 1
+                # reset uploader: set key baru dengan uuid untuk mengosongkan widget
+                new_key = f"form_image_uploader_{uuid.uuid4().hex}"
+                # NOTE: Streamlit file_uploader tidak dapat di-reset langsung; solusi: gunakan rerun via setting a new widget key.
+                # Untuk menjaga behaviour tanpa experimental_rerun, gunakan st.experimental_set_query_params trick is possible,
+                # tapi di sini kita set session var agar field text kosong. Uploader akan tetap menampilkan sebelumnya di beberapa versi Streamlit,
+                # Jika ingin 100% reset uploader, restart komponen dengan rerun dibutuhkan. Namun text input & qty sudah kosong.
+                st.session_state["form_item_name"] = ""
+                st.session_state["form_item_qty"] = 1
 
-    elif page == "Reports":
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<h3>Reports & Export</h3>', unsafe_allow_html=True)
-        df = st.session_state.inventory_df
-        st.markdown('<div class="small">Export daftar barang (CSV) atau gambar per item.</div>', unsafe_allow_html=True)
-        if st.button('Export CSV'):
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button('Download CSV', data=csv, file_name='inventory_export.csv')
-        st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
-        # export zipped images (simple approach: provide link per image)
-        for _, r in df.iterrows():
-            if r['image_path'] and os.path.exists(r['image_path']):
-                st.markdown(f"- {r['name']} — <a href='file://{os.path.abspath(r['image_path'])}' target='_blank'>image</a>", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("**Quick scan (manual input / simulate barcode)**")
+    with st.form("quick_scan_form"):
+        scan_input = st.text_input("Masukkan kode / nama hasil scan", value="", key="scan_input_field")
+        scan_qty = st.number_input("Qty", min_value=1, value=1, step=1, key="scan_qty_field")
+        if st.form_submit_button("Scan & Add"):
+            if not scan_input.strip():
+                st.warning("Input scan kosong.")
+            else:
+                add_item(scan_input.strip(), scan_qty, pil_image_to_bytes(generate_default_avatar(256)))
+                st.success(f"Scan '{scan_input.strip()}' ditambahkan (qty {scan_qty}).")
+                # clear quick-scan fields
+                st.session_state["scan_input_field"] = ""
+                st.session_state["scan_qty_field"] = 1
 
-    else:  # Settings
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<h3>Settings</h3>', unsafe_allow_html=True)
-        st.markdown('<div class="small">Theme tokens and tailwind snippet are embedded in the app header; copy them to your project.</div>', unsafe_allow_html=True)
-        st.markdown('<details><summary>Theme tokens (CSS)</summary><pre>'+THEME_CSS+'</pre></details>', unsafe_allow_html=True)
-        tailwind_snippet = "module.exports = { theme: { extend: { colors: { primary: {100: '#E6F0FF',500: '#0B66FF',600: '#0856D6'}, secondary: {500: '#0BB39A',600: '#089675'}, warning: '#FFB020', danger: '#FF4D4F', surface: {100: '#FFFFFF', 200: '#F5F7FB'}, muted: {400: '#8A97B2',600: '#4A5568'} }, boxShadow: { 'soft-primary': '0 6px 18px rgba(11,102,255,0.08)' } } } }"
-        st.code(tailwind_snippet, language='javascript')
-        st.markdown('</div>', unsafe_allow_html=True)
+# -----------------------
+# Page: Items
+# -----------------------
+elif page == "Items":
+    st.title("Items")
+    st.markdown("Daftar barang. Gunakan filter untuk mencari, dan tombol untuk hapus/edit.")
+    filter_text = st.text_input("Filter nama...", value=st.session_state["filter_text"], key="items_filter")
+    st.session_state["filter_text"] = filter_text
 
-st.markdown('</div></div>', unsafe_allow_html=True)
+    items_listed = get_items_filtered(filter_text)
 
-# footer
-st.markdown('<div style="text-align:center;padding:12px;color:var(--text-muted)">Built with ❤ — Stockify Pro demo</div>', unsafe_allow_html=True)
+    st.markdown(f"**{len(items_listed)} items ditemukan**")
+    for idx, it in enumerate(items_listed):
+        cols = st.columns([0.12, 0.6, 0.28])
+        if it["image"]:
+            cols[0].image(Image.open(io.BytesIO(it["image"])), width=64)
+        else:
+            cols[0].image(generate_default_avatar(64), width=64)
+        cols[1].markdown(f"**{it['name']}**\n\nQty: {it['qty']}\nID: `{it['id']}`")
+        cdel, cedit = cols[2].columns([1,1])
+        if cdel.button("Hapus", key=f"del-{it['id']}"):
+            delete_item(it["id"])
+            st.success(f"Item '{it['name']}' dihapus.")
+        if cedit.button("Edit", key=f"edit-{it['id']}"):
+            # buka modal-like UI sederhana
+            with st.expander(f"Edit {it['name']}"):
+                new_name = st.text_input("Nama", value=it["name"], key=f"name-edit-{it['id']}")
+                new_qty = st.number_input("Qty", min_value=0, value=it["qty"], key=f"qty-edit-{it['id']}")
+                new_img = st.file_uploader("Foto (opsional)", type=["png","jpg","jpeg"], key=f"img-edit-{it['id']}")
+                if st.button("Simpan Perubahan", key=f"save-edit-{it['id']}"):
+                    # update item in-place
+                    for j, ii in enumerate(st.session_state["items"]):
+                        if ii["id"] == it["id"]:
+                            st.session_state["items"][j]["name"] = new_name.strip() or ii["name"]
+                            st.session_state["items"][j]["qty"] = int(new_qty)
+                            if new_img:
+                                st.session_state["items"][j]["image"] = new_img.read()
+                            st.success("Perubahan disimpan.")
+                            break
 
-# ---------------------------
-# Notes & TODOs visible inside app
-# ---------------------------
+    # CSV export / import
+    st.markdown("---")
+    cols = st.columns([1,1,1])
+    if cols[0].button("Export CSV"):
+        df = pd.DataFrame([{"id": it["id"], "name": it["name"], "qty": it["qty"], "created_at": it["created_at"]} for it in st.session_state["items"]])
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("Download CSV", data=csv, file_name="items.csv", mime="text/csv")
+    uploaded_csv = cols[1].file_uploader("Import CSV (kolom: name,qty)", type=["csv"])
+    if uploaded_csv is not None:
+        try:
+            df = pd.read_csv(uploaded_csv)
+            added = 0
+            for _, r in df.iterrows():
+                if pd.isna(r.get("name")): 
+                    continue
+                name = str(r.get("name")).strip()
+                qty = int(r.get("qty")) if not pd.isna(r.get("qty")) else 0
+                add_item(name, qty, pil_image_to_bytes(generate_default_avatar(256)))
+                added += 1
+            st.success(f"{added} item berhasil diimport dari CSV.")
+        except Exception as e:
+            st.error("Gagal meng-import CSV: " + str(e))
 
-st.info('''
-Tips & Next steps:
-- For barcode scanning integrate a JS barcode reader or server-side library (e.g. QuaggaJS for browser; pyzbar for server processing).
-- For offline-first mobile use PWA + local DB (IndexedDB) + background sync to server.
-- For production persist to SQL DB and store images in object storage (S3).
-''')
+# -----------------------
+# Page: Reports
+# -----------------------
+elif page == "Reports":
+    st.title("Reports")
+    st.markdown("Visualisasi sederhana: jumlah per item (bar chart).")
+    items = st.session_state["items"]
+    if not items:
+        st.info("Belum ada data item. Tambahkan beberapa item di menu 'Scan & Add' atau 'Items'.")
+    else:
+        df = pd.DataFrame([{"name": it["name"], "qty": it["qty"]} for it in items])
+        agg = df.groupby("name", as_index=False).sum().sort_values("qty", ascending=False)
+        st.markdown("### Quantity per Item")
+        st.bar_chart(data=agg.set_index("name")["qty"])
+        st.markdown("---")
+        st.markdown("### Statistik singkat")
+        st.table({
+            "Total SKUs": [len(items)],
+            "Total Quantity": [sum(it["qty"] for it in items)],
+            "Low stock (<=2)": [len([it for it in items if it["qty"] <= 2])]
+        })
+
+# -----------------------
+# Page: Settings
+# -----------------------
+elif page == "Settings":
+    st.title("Settings")
+    st.markdown("Atur profil dan preferensi. Tidak ada kode/tema yang ditampilkan di sini — hanya UI yang bersih.")
+
+    col1, col2 = st.columns([1,2])
+    with col1:
+        st.markdown("#### Foto profil")
+        current_img = Image.open(io.BytesIO(st.session_state["profile_img"]))
+        st.image(current_img, width=150)
+        uploaded = st.file_uploader("Upload foto profil (jpg/png)", type=["jpg","jpeg","png"], key="profile_upload")
+        if uploaded is not None:
+            try:
+                st.session_state["profile_img"] = uploaded.read()
+                st.success("Foto profil diperbarui.")
+            except Exception as e:
+                st.error("Gagal memperbarui foto: " + str(e))
+
+    with col2:
+        st.markdown("#### Preferensi Aplikasi")
+        theme_dark = st.checkbox("Mode Gelap (fitur demo)", value=False, key="pref_theme_dark")
+        low_stock_threshold = st.number_input("Threshold low-stock (untuk dashboard)", min_value=0, value=2, key="pref_low_stock")
+        st.markdown("**Catatan:** Pengaturan ini hanya untuk demo; untuk penyimpanan permanen hubungkan ke DB.")
+
+# -----------------------
+# Footer (tidy)
+# -----------------------
+st.markdown("---")
+st.markdown("<div class='small'>Built with ❤ — Stockify Pro demo (revised)</div>", unsafe_allow_html=True)
