@@ -71,7 +71,7 @@ def total_quantity():
 # -------------------------------
 #        SIDEBAR NAVIGATION
 # -------------------------------
-st.sidebar.title("Stockify Pro")
+st.sidebar.title("Stockify Billa")
 page = st.sidebar.radio("Menu", ["Dashboard", "Tambah Barang", "Daftar Barang"])
 
 threshold = st.sidebar.number_input("Ambang Stok Rendah (≤)", min_value=0, value=5)
