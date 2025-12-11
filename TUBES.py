@@ -777,4 +777,312 @@ elif page == "📋 Items":
             # Item Info
             status, icon, label = get_stock_status(item["qty"])
             cols[1].markdown(f"""
-            <p style='font-weight: 600; color: {COLORS['neutral_900']}; margin: 0; font-size: 16px;'
+            <p style='font-weight: 600; color: {COLORS['neutral_900']}; margin: 0; font-size: 16px;'>{item['name']}</p>
+            <p class='caption'>ID: {item['id'][:8]}... | Updated: {item.get('updated_at', item['created_at']).strftime('%Y-%m-%d')}</p>
+            """, unsafe_allow_html=True)
+            
+            # Status Badge
+            cols[2].markdown(f"""
+            <span class='badge badge-{status}'>{icon} {item['qty']} units</span>
+            """, unsafe_allow_html=True)
+            
+            # Actions
+            action_col1, action_col2 = cols[3].columns(2)
+            
+            # Edit Button
+            if action_col1.button("✏️", key=f"edit-{item['id']}", help="Edit item"):
+                st.session_state["edit_mode"][item['id']] = True
+                st.rerun()
+            
+            # Delete Button
+            if action_col2.button("🗑️", key=f"del-{item['id']}", help="Delete item"):
+                delete_item(item["id"])
+                st.success(f"✅ '{item['name']}' deleted!")
+                st.rerun()
+            
+            # Edit Mode Expander
+            if st.session_state.get("edit_mode", {}).get(item['id'], False):
+                with st.expander(f"✏️ Edit '{item['name']}'", expanded=True):
+                    with st.form(f"edit_form_{item['id']}"):
+                        edit_name = st.text_input("Name", value=item["name"])
+                        edit_qty = st.number_input("Quantity", min_value=0, value=item["qty"], step=1)
+                        edit_img = st.file_uploader("Change Photo", type=["png", "jpg", "jpeg"], key=f"img-{item['id']}")
+                        
+                        col_save, col_cancel = st.columns(2)
+                        
+                        if col_save.form_submit_button("💾 Save", use_container_width=True):
+                            img_bytes = edit_img.read() if edit_img else None
+                            update_item(item['id'], edit_name, edit_qty, img_bytes)
+                            st.session_state["edit_mode"][item['id']] = False
+                            st.success("✅ Changes saved!")
+                            st.rerun()
+                        
+                        if col_cancel.form_submit_button("❌ Cancel", use_container_width=True):
+                            st.session_state["edit_mode"][item['id']] = False
+                            st.rerun()
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.info("🔍 No items found. Try adjusting your search or add new items.")
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Export/Import Section
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("<h3>📤 Export / Import</h3>", unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("📥 Export to CSV", use_container_width=True):
+            if st.session_state["items"]:
+                df = pd.DataFrame([
+                    {
+                        "id": it["id"],
+                        "name": it["name"],
+                        "quantity": it["qty"],
+                        "created_at": it["created_at"].strftime('%Y-%m-%d %H:%M:%S'),
+                        "updated_at": it.get("updated_at", it["created_at"]).strftime('%Y-%m-%d %H:%M:%S')
+                    } for it in st.session_state["items"]
+                ])
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "⬇️ Download CSV",
+                    data=csv,
+                    file_name=f"stockify_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.warning("⚠️ No items to export")
+    
+    with col2:
+        uploaded_csv = st.file_uploader("📤 Import from CSV", type=["csv"])
+        if uploaded_csv is not None:
+            try:
+                df = pd.read_csv(uploaded_csv)
+                if 'name' not in df.columns or 'quantity' not in df.columns:
+                    st.error("⚠️ CSV must have 'name' and 'quantity' columns")
+                else:
+                    added = 0
+                    for _, row in df.iterrows():
+                        if pd.notna(row.get("name")):
+                            name = str(row["name"]).strip()
+                            qty = int(row.get("quantity", 0)) if pd.notna(row.get("quantity")) else 0
+                            add_item(name, qty)
+                            added += 1
+                    st.success(f"✅ {added} items imported successfully!")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"⚠️ Import failed: {str(e)}")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# -----------------------
+# PAGE: Reports
+# -----------------------
+elif page == "📊 Reports":
+    st.markdown("<h1>📊 Reports & Analytics</h1>", unsafe_allow_html=True)
+    st.markdown("<p class='text-secondary'>Visual insights of your inventory</p>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    items = st.session_state["items"]
+    
+    if not items:
+        st.info("📊 No data available. Add some items first!")
+    else:
+        # Summary Stats
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("<h3>📈 Summary Statistics</h3>", unsafe_allow_html=True)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        total_items = len(items)
+        total_qty = sum(it["qty"] for it in items)
+        avg_qty = total_qty / total_items if total_items > 0 else 0
+        threshold = st.session_state.get("low_stock_threshold", 5)
+        low_stock_count = len([it for it in items if 0 < it["qty"] <= threshold])
+        
+        col1.metric("Total Items", total_items)
+        col2.metric("Total Quantity", total_qty)
+        col3.metric("Average Qty/Item", f"{avg_qty:.1f}")
+        col4.metric("Low Stock Items", low_stock_count)
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Charts
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("<h3>📊 Quantity by Item</h3>", unsafe_allow_html=True)
+        
+        df = pd.DataFrame([{"name": it["name"], "quantity": it["qty"]} for it in items])
+        df_sorted = df.sort_values("quantity", ascending=False).head(15)
+        
+        st.bar_chart(df_sorted.set_index("name")["quantity"])
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Stock Status Distribution
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("<h3>📊 Stock Status Distribution</h3>", unsafe_allow_html=True)
+        
+        status_data = {"In Stock": 0, "Low Stock": 0, "Out of Stock": 0}
+        for it in items:
+            status, _, _ = get_stock_status(it["qty"])
+            if status == "success":
+                status_data["In Stock"] += 1
+            elif status == "warning":
+                status_data["Low Stock"] += 1
+            else:
+                status_data["Out of Stock"] += 1
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("🟢 In Stock", status_data["In Stock"])
+        col2.metric("🟡 Low Stock", status_data["Low Stock"])
+        col3.metric("🔴 Out of Stock", status_data["Out of Stock"])
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Detailed Table
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("<h3>📋 Detailed Inventory Table</h3>", unsafe_allow_html=True)
+        
+        table_df = pd.DataFrame([
+            {
+                "Item Name": it["name"],
+                "Quantity": it["qty"],
+                "Status": get_stock_status(it["qty"])[2],
+                "Last Updated": it.get("updated_at", it["created_at"]).strftime('%Y-%m-%d %H:%M')
+            } for it in items
+        ])
+        
+        st.dataframe(table_df, use_container_width=True, hide_index=True)
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# -----------------------
+# PAGE: Settings
+# -----------------------
+elif page == "⚙️ Settings":
+    st.markdown("<h1>⚙️ Settings</h1>", unsafe_allow_html=True)
+    st.markdown("<p class='text-secondary'>Configure your Stockify preferences</p>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Profile Settings
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("<h3>👤 Profile Settings</h3>", unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        try:
+            current_img = Image.open(io.BytesIO(st.session_state["profile_img"]))
+            st.image(current_img, width=150)
+        except:
+            st.image(generate_default_avatar(150, 'primary'), width=150)
+        
+        uploaded_profile = st.file_uploader("Upload Profile Photo", type=["jpg", "jpeg", "png"], key="profile_upload")
+        
+        if uploaded_profile is not None:
+            try:
+                st.session_state["profile_img"] = uploaded_profile.read()
+                st.success("✅ Profile photo updated!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"⚠️ Failed to update photo: {str(e)}")
+    
+    with col2:
+        st.markdown("<p class='text-secondary'>Update your profile picture to personalize your dashboard.</p>", unsafe_allow_html=True)
+        
+        color_options = {
+            "🔵 Blue (Default)": "primary",
+            "🟢 Green": "success",
+            "🟣 Purple": "accent",
+            "🟡 Amber": "warning"
+        }
+        
+        selected_color = st.selectbox("Avatar Color Theme", list(color_options.keys()))
+        
+        if st.button("🎨 Generate New Avatar"):
+            color = color_options[selected_color]
+            st.session_state["profile_img"] = pil_image_to_bytes(generate_default_avatar(256, color))
+            st.success(f"✅ New avatar generated!")
+            st.rerun()
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Inventory Settings
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("<h3>📦 Inventory Settings</h3>", unsafe_allow_html=True)
+    
+    threshold = st.number_input(
+        "🔔 Low Stock Alert Threshold",
+        min_value=1,
+        max_value=50,
+        value=st.session_state.get("low_stock_threshold", 5),
+        help="Items with quantity at or below this number will be flagged as low stock"
+    )
+    
+    if st.button("💾 Save Threshold"):
+        st.session_state["low_stock_threshold"] = threshold
+        st.success(f"✅ Low stock threshold set to {threshold}")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Data Management
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("<h3>🗄️ Data Management</h3>", unsafe_allow_html=True)
+    
+    st.warning("⚠️ Warning: These actions cannot be undone!")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🗑️ Clear All Items", use_container_width=True):
+            if st.session_state["items"]:
+                item_count = len(st.session_state["items"])
+                st.session_state["items"] = []
+                st.success(f"✅ {item_count} items cleared!")
+                st.rerun()
+            else:
+                st.info("ℹ️ No items to clear")
+    
+    with col2:
+        if st.button("🔄 Reset All Settings", use_container_width=True):
+            st.session_state["low_stock_threshold"] = 5
+            st.session_state["profile_img"] = pil_image_to_bytes(generate_default_avatar(256, 'primary'))
+            st.success("✅ Settings reset to default!")
+            st.rerun()
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # About
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("<h3>ℹ️ About Stockify</h3>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <p class='body-text'>
+    <strong>Version:</strong> 1.0.0<br>
+    <strong>Built with:</strong> Streamlit & Python<br>
+    <strong>Color Palette:</strong> Professional Blue Theme<br>
+    <strong>Font:</strong> Poppins
+    </p>
+    <p class='text-secondary'>
+    Stockify is a smart inventory management system designed for simplicity and efficiency.
+    </p>
+    """, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# -----------------------
+# Footer
+# -----------------------
+st.markdown("---")
+st.markdown("""
+<div class='footer'>
+    Built with ❤️ using Streamlit | Stockify v1.0 | © 2024
+</div>
+""", unsafe_allow_html=True)
