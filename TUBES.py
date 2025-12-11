@@ -390,4 +390,4 @@ elif page == "Settings":
         st.warning("⚠️ Data is automatically saved after each operation")
 
 st.markdown("---")
-st.caption(f"Stockify Pro - OOP Edition | Items: {len(inv.items)} | Last updated
+st.caption(f"Stockify Pro - OOP Edition | Items: {len(inv.items)} | Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
