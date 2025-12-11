@@ -1,1 +1,1 @@
-print("Syathir Sepelek") 
+ st.title("Syathir Sepelek")
