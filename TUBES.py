@@ -514,7 +514,7 @@ def main():
     st.markdown("---")
     st.markdown(
         "<div style='text-align: center; color: #6b7280; padding: 20px;'>"
-        "Built with ❤️ using Streamlit | Stockify v2.0 | © 2024"
+        "Built with ❤️ from Kirana, Billa, Arqam, Hisyam | Stockify  | © 2025"
         "</div>",
         unsafe_allow_html=True
     )
