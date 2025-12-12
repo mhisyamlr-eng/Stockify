@@ -1,5 +1,4 @@
 # Stockify_Simple.py - Inventory Management System
-# Jalankan: streamlit run Stockify_Simple.py
 
 import streamlit as st
 from PIL import Image, ImageDraw
@@ -11,9 +10,8 @@ import os
 from dataclasses import dataclass, asdict
 from typing import List, Dict
 
-# ======================
 # DATA MODEL
-# ======================
+
 @dataclass
 class Item:
     """Model untuk item inventory"""
@@ -32,9 +30,9 @@ class Item:
             return ("🟡", "Low Stock", "#FEF3C7", "#92400E")
         return ("🟢", "In Stock", "#D1FAE5", "#065F46")
 
-# ======================
+
 # DATA MANAGER
-# ======================
+
 class InventoryManager:
     """Kelola data inventory"""
     
@@ -100,9 +98,9 @@ class InventoryManager:
                 data = json.load(f)
                 self.items = [Item(**i) for i in data]
 
-# ======================
+
 # UI STYLING
-# ======================
+
 def apply_styles():
     """CSS styling dengan warna menarik"""
     st.markdown("""
@@ -291,9 +289,9 @@ def apply_styles():
     </style>
     """, unsafe_allow_html=True)
 
-# ======================
+
 # PAGE RENDERERS
-# ======================
+
 def render_dashboard(inv: InventoryManager):
     """Dashboard dengan metrics"""
     st.markdown("<h1>🏠 Dashboard</h1>", unsafe_allow_html=True)
@@ -466,9 +464,9 @@ def render_settings(inv: InventoryManager):
             st.success("✅ Demo data loaded!")
             st.rerun()
 
-# ======================
+
 # MAIN APP
-# ======================
+
 def main():
     st.set_page_config(
         page_title="Stockify - Inventory System",
