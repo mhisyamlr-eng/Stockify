@@ -1,17 +1,19 @@
-# Stockify_Simple.py - Inventory Management System
+# Stockify_CSV.py - Inventory Management System dengan CSV
+# Jalankan: streamlit run Stockify_CSV.py
 
 import streamlit as st
 from PIL import Image, ImageDraw
 import io
 import pandas as pd
 from datetime import datetime
-import json
+import csv
 import os
 from dataclasses import dataclass, asdict
 from typing import List, Dict
 
+# ======================
 # DATA MODEL
-
+# ======================
 @dataclass
 class Item:
     """Model untuk item inventory"""
@@ -30,14 +32,14 @@ class Item:
             return ("🟡", "Low Stock", "#FEF3C7", "#92400E")
         return ("🟢", "In Stock", "#D1FAE5", "#065F46")
 
-
+# ======================
 # DATA MANAGER
-
+# ======================
 class InventoryManager:
-    """Kelola data inventory"""
+    """Kelola data inventory dengan CSV"""
     
     def __init__(self):
-        self.file = "inventory.json"
+        self.file = "inventory.csv"
         self.items: List[Item] = []
         self.load()
     
@@ -86,21 +88,54 @@ class InventoryManager:
         }
     
     def save(self):
-        """Simpan ke file"""
-        data = [asdict(i) for i in self.items]
-        with open(self.file, 'w') as f:
-            json.dump(data, f, indent=2)
+        """Simpan ke file CSV"""
+        # Jika tidak ada data, buat file kosong dengan header
+        if not self.items:
+            with open(self.file, 'w', newline='', encoding='utf-8') as f:
+                fieldnames = ['id', 'name', 'quantity', 'category', 'image_path', 'created_at']
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+            return
+        
+        # Simpan data ke CSV
+        with open(self.file, 'w', newline='', encoding='utf-8') as f:
+            # Konversi items ke dictionary
+            data = [asdict(i) for i in self.items]
+            
+            # Dapatkan fieldnames dari dictionary pertama
+            fieldnames = data[0].keys()
+            
+            # Buat CSV writer
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            
+            # Tulis header
+            writer.writeheader()
+            
+            # Tulis semua rows
+            writer.writerows(data)
     
     def load(self):
-        """Load dari file"""
+        """Load dari file CSV"""
         if os.path.exists(self.file):
-            with open(self.file, 'r') as f:
-                data = json.load(f)
-                self.items = [Item(**i) for i in data]
+            try:
+                with open(self.file, 'r', newline='', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    self.items = []
+                    
+                    for row in reader:
+                        # Convert quantity dari string ke int
+                        row['quantity'] = int(row['quantity'])
+                        
+                        # Buat Item object
+                        self.items.append(Item(**row))
+            except Exception as e:
+                # Jika error (file kosong/corrupt), buat list kosong
+                self.items = []
+                print(f"Error loading CSV: {e}")
 
-
+# ======================
 # UI STYLING
-
+# ======================
 def apply_styles():
     """CSS styling dengan warna menarik"""
     st.markdown("""
@@ -289,9 +324,9 @@ def apply_styles():
     </style>
     """, unsafe_allow_html=True)
 
-
+# ======================
 # PAGE RENDERERS
-
+# ======================
 def render_dashboard(inv: InventoryManager):
     """Dashboard dengan metrics"""
     st.markdown("<h1>🏠 Dashboard</h1>", unsafe_allow_html=True)
@@ -318,21 +353,24 @@ def render_dashboard(inv: InventoryManager):
     
     # Recent Items
     st.markdown("### 🕐 Recent Items")
-    for item in inv.items[-5:]:
-        icon, status, bg, text = item.get_status()
-        st.markdown(f"""
-        <div class='item-card'>
-            <div style='display: flex; justify-content: space-between; align-items: center;'>
-                <div>
-                    <div class='item-name'>{item.name}</div>
-                    <span class='item-category'>{item.category}</span>
+    if inv.items:
+        for item in inv.items[-5:]:
+            icon, status, bg, text = item.get_status()
+            st.markdown(f"""
+            <div class='item-card'>
+                <div style='display: flex; justify-content: space-between; align-items: center;'>
+                    <div>
+                        <div class='item-name'>{item.name}</div>
+                        <span class='item-category'>{item.category}</span>
+                    </div>
+                    <span class='status-badge' style='background: {bg}; color: {text};'>
+                        {icon} {item.quantity} units
+                    </span>
                 </div>
-                <span class='status-badge' style='background: {bg}; color: {text};'>
-                    {icon} {item.quantity} units
-                </span>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+    else:
+        st.info("📦 No items yet. Add your first item!")
 
 def render_add_item(inv: InventoryManager):
     """Form tambah item"""
@@ -364,6 +402,10 @@ def render_items(inv: InventoryManager):
     items = inv.search(search)
     
     st.markdown(f"**{len(items)} items found**")
+    
+    if not items:
+        st.info("📦 No items found. Try different search terms or add new items.")
+        return
     
     # Items list
     for item in items:
@@ -431,8 +473,15 @@ def render_reports(inv: InventoryManager):
         
         # Export
         st.markdown("### 📥 Export Data")
-        csv = df.to_csv(index=False)
-        st.download_button("⬇️ Download CSV", csv, "stockify_report.csv", "text/csv")
+        csv_data = df.to_csv(index=False)
+        st.download_button("⬇️ Download CSV Report", csv_data, "stockify_report.csv", "text/csv")
+        
+        # Show raw data
+        with st.expander("📄 View Raw CSV Data"):
+            full_df = pd.DataFrame([asdict(i) for i in inv.items])
+            st.dataframe(full_df, use_container_width=True)
+    else:
+        st.info("📦 No data to display. Add some items first!")
 
 def render_settings(inv: InventoryManager):
     """Pengaturan aplikasi"""
@@ -443,15 +492,17 @@ def render_settings(inv: InventoryManager):
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("🗑️ Clear All Data", use_container_width=True):
-            if st.checkbox("⚠️ Confirm deletion"):
+        st.markdown("#### 🗑️ Clear All Data")
+        if st.button("Clear All Data", use_container_width=True, type="secondary"):
+            if st.checkbox("⚠️ I understand this will delete all data"):
                 inv.items = []
                 inv.save()
                 st.success("✅ All data cleared!")
                 st.rerun()
     
     with col2:
-        if st.button("🔄 Load Demo Data", use_container_width=True):
+        st.markdown("#### 🔄 Load Demo Data")
+        if st.button("Load Demo Data", use_container_width=True, type="primary"):
             demo = [
                 ("Laptop Dell", 12, "Electronics"),
                 ("Office Chair", 5, "Furniture"),
@@ -463,10 +514,24 @@ def render_settings(inv: InventoryManager):
                 inv.add(name, qty, cat)
             st.success("✅ Demo data loaded!")
             st.rerun()
+    
+    # File Info
+    st.markdown("---")
+    st.markdown("### 📁 File Information")
+    if os.path.exists(inv.file):
+        file_size = os.path.getsize(inv.file)
+        st.info(f"""
+        **File:** `{inv.file}`  
+        **Size:** {file_size} bytes  
+        **Format:** CSV (Comma-Separated Values)  
+        **Encoding:** UTF-8
+        """)
+    else:
+        st.warning("⚠️ Data file not created yet. Add items to create the file.")
 
-
+# ======================
 # MAIN APP
-
+# ======================
 def main():
     st.set_page_config(
         page_title="Stockify - Inventory System",
@@ -485,7 +550,7 @@ def main():
     # Sidebar
     with st.sidebar:
         st.markdown("<h1>📦 Stockify</h1>", unsafe_allow_html=True)
-        st.markdown("<p>Smart Inventory System</p>", unsafe_allow_html=True)
+        st.markdown("<p>Smart Inventory System (CSV Edition)</p>", unsafe_allow_html=True)
         st.markdown("---")
         
         page = st.radio(
@@ -509,7 +574,7 @@ def main():
     st.markdown("---")
     st.markdown(
         "<div style='text-align: center; color: #6b7280; padding: 20px;'>"
-        "Built with ❤️ from Kirana, Billa, Hisyam, Arqam | Stockify | © 2025"
+        "Built with ❤️ from Kirana, Billa, Hisyam, Arqam | Stockify CSV | ©️ 2025"
         "</div>",
         unsafe_allow_html=True
     )
