@@ -411,23 +411,43 @@ class UIConfig:
     """Class untuk konfigurasi UI"""
     
     COLORS = {
-        'primary': '#2563EB',
-        'primary_dark': '#1E3A8A',
-        'primary_hover': '#1D4ED8',
-        'success': '#10B981',
-        'success_dark': '#047857',
-        'warning': '#F59E0B',
-        'warning_dark': '#B45309',
-        'danger': '#EF4444',
-        'danger_dark': '#B91C1C',
-        'accent': '#8B5CF6',
-        'neutral_0': '#FFFFFF',
-        'neutral_100': '#F3F4F6',
-        'neutral_200': '#E5E7EB',
-        'neutral_500': '#6B7280',
-        'neutral_700': '#374151',
-        'neutral_900': '#111827',
-    }
+    # Brand / Primary Colors
+    'primary': '#2563EB',
+    'primary_dark': '#1E3A8A',
+    'primary_hover': '#1D4ED8',
+    
+    # Secondary Colors
+    'success': '#10B981',
+    'success_dark': '#047857',
+    'warning': '#F59E0B',
+    'warning_dark': '#B45309',
+    'danger': '#EF4444',
+    'danger_dark': '#B91C1C',
+    'danger_hover': '#DC2626',
+    'accent': '#8B5CF6',
+    'accent_dark': '#6D28D9',
+    
+    # Neutral System
+    'neutral_0': '#FFFFFF',
+    'neutral_50': '#F9FAFB',
+    'neutral_100': '#F3F4F6',
+    'neutral_200': '#E5E7EB',
+    'neutral_300': '#D1D5DB',
+    'neutral_500': '#6B7280',
+    'neutral_700': '#374151',
+    'neutral_900': '#111827',
+    'neutral_muted': '#9CA3AF',
+    
+    # Badge Backgrounds
+    'badge_success_bg': '#D1FAE5',
+    'badge_success_text': '#065F46',
+    'badge_warning_bg': '#FEF3C7',
+    'badge_warning_text': '#B45309',
+    'badge_danger_bg': '#FEE2E2',
+    'badge_danger_text': '#B91C1C',
+    'badge_info_bg': '#EDE9FE',
+    'badge_info_text': '#5B21B6',
+}
     
     @staticmethod
     def inject_css():
