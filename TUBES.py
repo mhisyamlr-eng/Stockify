@@ -252,9 +252,6 @@ def apply_styles():
         color: #1f2937;
         font-weight: 700;
         margin-bottom: 24px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
     }
     
     h3 {
@@ -514,7 +511,7 @@ def main():
     st.markdown("---")
     st.markdown(
         "<div style='text-align: center; color: #6b7280; padding: 20px;'>"
-        "Built with ❤️ from Kirana, Billa, Arqam, Hisyam | Stockify  | © 2025"
+        "Built with ❤️ from Kirana, Billa, Hisyam, Arqam | Stockify | © 2025"
         "</div>",
         unsafe_allow_html=True
     )
