@@ -550,7 +550,7 @@ def main():
     # Sidebar
     with st.sidebar:
         st.markdown("<h1>📦 Stockify</h1>", unsafe_allow_html=True)
-        st.markdown("<p>Smart Inventory System (CSV Edition)</p>", unsafe_allow_html=True)
+        st.markdown("<p>Smart Inventory System </p>", unsafe_allow_html=True)
         st.markdown("---")
         
         page = st.radio(
