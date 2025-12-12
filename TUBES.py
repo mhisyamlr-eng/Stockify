@@ -9,129 +9,186 @@ from datetime import datetime
 import csv
 import os
 from dataclasses import dataclass, asdict
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 # ======================
 # DATA MODEL
 # ======================
 @dataclass
-class Item:
-    """Model untuk item inventory"""
+class Barang:
+    """Model untuk barang inventory"""
     id: str
-    name: str
-    quantity: int
+    nama: str
+    jumlah: int
     category: str
     image_path: str
     created_at: str
     
+    def get_id(self) -> str:
+        return self.id
+    
+    def get_nama(self) -> str:
+        return self.nama
+    
+    def get_jumlah(self) -> int:
+        return self.jumlah
+    
+    def set_nama(self, nama: str):
+        self.nama = nama
+    
+    def set_jumlah(self, jumlah: int):
+        self.jumlah = jumlah
+    
+    def tambah_stok(self, amount: int):
+        """Tambah stok barang"""
+        self.jumlah += amount
+    
+    def kurangi_stok(self, amount: int):
+        """Kurangi stok barang"""
+        if self.jumlah >= amount:
+            self.jumlah -= amount
+            return True
+        return False
+    
     def get_status(self):
         """Dapatkan status stock"""
-        if self.quantity == 0:
+        if self.jumlah == 0:
             return ("🔴", "Out of Stock", "#FEE2E2", "#991B1B")
-        elif self.quantity <= 5:
+        elif self.jumlah <= 5:
             return ("🟡", "Low Stock", "#FEF3C7", "#92400E")
         return ("🟢", "In Stock", "#D1FAE5", "#065F46")
 
 # ======================
-# DATA MANAGER
+# REPOSITORY LAYER
 # ======================
-class InventoryManager:
-    """Kelola data inventory dengan CSV"""
+class InventoryRepository:
+    """Repository untuk mengelola data barang dengan CSV"""
     
-    def __init__(self):
-        self.file = "inventory.csv"
-        self.items: List[Item] = []
-        self.load()
+    def __init__(self, filename: str = "inventory.csv"):
+        self.filename = filename
+        self.barang_list: List[Barang] = []
+        self._load_from_csv()
     
-    def add(self, name: str, qty: int, category: str, img_path: str = ""):
-        """Tambah item baru"""
-        item = Item(
-            id=str(len(self.items) + 1),
-            name=name,
-            quantity=qty,
+    def create_barang(self, nama: str, jumlah: int, category: str, image_path: str = "") -> Barang:
+        """Buat barang baru"""
+        barang = Barang(
+            id=str(len(self.barang_list) + 1),
+            nama=nama,
+            jumlah=jumlah,
             category=category,
-            image_path=img_path,
+            image_path=image_path,
             created_at=datetime.now().strftime("%Y-%m-%d %H:%M")
         )
-        self.items.append(item)
-        self.save()
-        return item
+        self.barang_list.append(barang)
+        self._save_to_csv()
+        return barang
     
-    def update(self, item_id: str, **kwargs):
-        """Update item"""
-        for item in self.items:
-            if item.id == item_id:
+    def get_all(self) -> List[Barang]:
+        """Dapatkan semua barang"""
+        return self.barang_list
+    
+    def get_by_nama(self, nama: str) -> List[Barang]:
+        """Cari barang berdasarkan nama"""
+        return [b for b in self.barang_list if nama.lower() in b.nama.lower()]
+    
+    def update_barang(self, barang_id: str, **kwargs) -> bool:
+        """Update data barang"""
+        for barang in self.barang_list:
+            if barang.id == barang_id:
                 for key, val in kwargs.items():
-                    setattr(item, key, val)
-                self.save()
+                    setattr(barang, key, val)
+                self._save_to_csv()
                 return True
         return False
     
-    def delete(self, item_id: str):
-        """Hapus item"""
-        self.items = [i for i in self.items if i.id != item_id]
-        self.save()
+    def delete_barang(self, barang_id: str) -> bool:
+        """Hapus barang"""
+        initial_length = len(self.barang_list)
+        self.barang_list = [b for b in self.barang_list if b.id != barang_id]
+        if len(self.barang_list) < initial_length:
+            self._save_to_csv()
+            return True
+        return False
     
-    def search(self, query: str = ""):
-        """Cari item"""
-        if not query:
-            return self.items
-        return [i for i in self.items if query.lower() in i.name.lower()]
-    
-    def get_stats(self):
-        """Statistik inventory"""
-        return {
-            "total": len(self.items),
-            "quantity": sum(i.quantity for i in self.items),
-            "low_stock": len([i for i in self.items if 0 < i.quantity <= 5]),
-            "out_stock": len([i for i in self.items if i.quantity == 0])
-        }
-    
-    def save(self):
-        """Simpan ke file CSV"""
-        # Jika tidak ada data, buat file kosong dengan header
-        if not self.items:
-            with open(self.file, 'w', newline='', encoding='utf-8') as f:
-                fieldnames = ['id', 'name', 'quantity', 'category', 'image_path', 'created_at']
+    def _save_to_csv(self):
+        """Simpan data ke CSV"""
+        if not self.barang_list:
+            with open(self.filename, 'w', newline='', encoding='utf-8') as f:
+                fieldnames = ['id', 'nama', 'jumlah', 'category', 'image_path', 'created_at']
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
             return
         
-        # Simpan data ke CSV
-        with open(self.file, 'w', newline='', encoding='utf-8') as f:
-            # Konversi items ke dictionary
-            data = [asdict(i) for i in self.items]
-            
-            # Dapatkan fieldnames dari dictionary pertama
+        with open(self.filename, 'w', newline='', encoding='utf-8') as f:
+            data = [asdict(b) for b in self.barang_list]
             fieldnames = data[0].keys()
-            
-            # Buat CSV writer
             writer = csv.DictWriter(f, fieldnames=fieldnames)
-            
-            # Tulis header
             writer.writeheader()
-            
-            # Tulis semua rows
             writer.writerows(data)
     
-    def load(self):
-        """Load dari file CSV"""
-        if os.path.exists(self.file):
+    def _load_from_csv(self):
+        """Load data dari CSV"""
+        if os.path.exists(self.filename):
             try:
-                with open(self.file, 'r', newline='', encoding='utf-8') as f:
+                with open(self.filename, 'r', newline='', encoding='utf-8') as f:
                     reader = csv.DictReader(f)
-                    self.items = []
+                    self.barang_list = []
                     
                     for row in reader:
-                        # Convert quantity dari string ke int
-                        row['quantity'] = int(row['quantity'])
-                        
-                        # Buat Item object
-                        self.items.append(Item(**row))
+                        row['jumlah'] = int(row['jumlah'])
+                        self.barang_list.append(Barang(**row))
             except Exception as e:
-                # Jika error (file kosong/corrupt), buat list kosong
-                self.items = []
+                self.barang_list = []
                 print(f"Error loading CSV: {e}")
+
+# ======================
+# MANAGER LAYER
+# ======================
+class StockManager:
+    """Manager untuk mengelola operasi stok"""
+    
+    def __init__(self, inventory_repo: InventoryRepository):
+        self.inventory_repo = inventory_repo
+    
+    def tambah_barang(self, nama: str, jumlah: int, category: str, image_path: str = "") -> Barang:
+        """Tambah barang baru ke inventory"""
+        return self.inventory_repo.create_barang(nama, jumlah, category, image_path)
+    
+    def tambah_stok(self, barang_id: str, amount: int) -> bool:
+        """Tambah stok barang yang sudah ada"""
+        for barang in self.inventory_repo.get_all():
+            if barang.id == barang_id:
+                barang.tambah_stok(amount)
+                self.inventory_repo._save_to_csv()
+                return True
+        return False
+    
+    def kurangi_stok(self, barang_id: str, amount: int) -> bool:
+        """Kurangi stok barang"""
+        for barang in self.inventory_repo.get_all():
+            if barang.id == barang_id:
+                if barang.kurangi_stok(amount):
+                    self.inventory_repo._save_to_csv()
+                    return True
+                return False
+        return False
+    
+    def cek_stok(self, barang_id: str) -> Optional[int]:
+        """Cek jumlah stok barang"""
+        for barang in self.inventory_repo.get_all():
+            if barang.id == barang_id:
+                return barang.get_jumlah()
+        return None
+    
+    def laporang_stok(self) -> Dict:
+        """Buat laporan statistik stok"""
+        barang_list = self.inventory_repo.get_all()
+        return {
+            "total_items": len(barang_list),
+            "total_quantity": sum(b.jumlah for b in barang_list),
+            "low_stock": len([b for b in barang_list if 0 < b.jumlah <= 5]),
+            "out_of_stock": len([b for b in barang_list if b.jumlah == 0])
+        }
 
 # ======================
 # UI STYLING
@@ -327,19 +384,19 @@ def apply_styles():
 # ======================
 # PAGE RENDERERS
 # ======================
-def render_dashboard(inv: InventoryManager):
+def render_dashboard(manager: StockManager):
     """Dashboard dengan metrics"""
     st.markdown("<h1>🏠 Dashboard</h1>", unsafe_allow_html=True)
     
-    stats = inv.get_stats()
+    stats = manager.laporang_stok()
     
     col1, col2, col3, col4 = st.columns(4)
     
     metrics = [
-        (col1, "📦", stats["total"], "Total Items", "#667eea"),
-        (col2, "📊", stats["quantity"], "Total Stock", "#48bb78"),
+        (col1, "📦", stats["total_items"], "Total Items", "#667eea"),
+        (col2, "📊", stats["total_quantity"], "Total Stock", "#48bb78"),
         (col3, "⚠️", stats["low_stock"], "Low Stock", "#f6ad55"),
-        (col4, "🚫", stats["out_stock"], "Out of Stock", "#fc8181")
+        (col4, "🚫", stats["out_of_stock"], "Out of Stock", "#fc8181")
     ]
     
     for col, icon, val, label, color in metrics:
@@ -353,18 +410,19 @@ def render_dashboard(inv: InventoryManager):
     
     # Recent Items
     st.markdown("### 🕐 Recent Items")
-    if inv.items:
-        for item in inv.items[-5:]:
-            icon, status, bg, text = item.get_status()
+    items = manager.inventory_repo.get_all()
+    if items:
+        for barang in items[-5:]:
+            icon, status, bg, text = barang.get_status()
             st.markdown(f"""
             <div class='item-card'>
                 <div style='display: flex; justify-content: space-between; align-items: center;'>
                     <div>
-                        <div class='item-name'>{item.name}</div>
-                        <span class='item-category'>{item.category}</span>
+                        <div class='item-name'>{barang.nama}</div>
+                        <span class='item-category'>{barang.category}</span>
                     </div>
                     <span class='status-badge' style='background: {bg}; color: {text};'>
-                        {icon} {item.quantity} units
+                        {icon} {barang.jumlah} units
                     </span>
                 </div>
             </div>
@@ -372,34 +430,34 @@ def render_dashboard(inv: InventoryManager):
     else:
         st.info("📦 No items yet. Add your first item!")
 
-def render_add_item(inv: InventoryManager):
+def render_add_item(manager: StockManager):
     """Form tambah item"""
     st.markdown("<h1>➕ Add New Item</h1>", unsafe_allow_html=True)
     
     with st.form("add_form", clear_on_submit=True):
         col1, col2 = st.columns([2, 1])
         
-        name = col1.text_input("🏷️ Item Name", placeholder="Enter item name...")
+        nama = col1.text_input("🏷️ Item Name", placeholder="Enter item name...")
         category = col2.selectbox("📁 Category", 
                                   ["Electronics", "Furniture", "Stationery", "Tools", "Other"])
         
-        quantity = st.number_input("📊 Quantity", min_value=0, value=1)
+        jumlah = st.number_input("📊 Quantity", min_value=0, value=1)
         
         if st.form_submit_button("✅ Add Item", use_container_width=True):
-            if name:
-                inv.add(name, quantity, category)
-                st.success(f"✅ '{name}' added successfully!")
+            if nama:
+                manager.tambah_barang(nama, jumlah, category)
+                st.success(f"✅ '{nama}' added successfully!")
                 st.balloons()
             else:
                 st.error("❌ Please enter item name")
 
-def render_items(inv: InventoryManager):
+def render_items(manager: StockManager):
     """List semua items"""
     st.markdown("<h1>📋 All Items</h1>", unsafe_allow_html=True)
     
     # Search
     search = st.text_input("🔍 Search", placeholder="Search items...")
-    items = inv.search(search)
+    items = manager.inventory_repo.get_by_nama(search) if search else manager.inventory_repo.get_all()
     
     st.markdown(f"**{len(items)} items found**")
     
@@ -408,66 +466,56 @@ def render_items(inv: InventoryManager):
         return
     
     # Items list
-    for item in items:
-        icon, status, bg, text = item.get_status()
+    for barang in items:
+        icon, status, bg, text = barang.get_status()
         
-        col1, col2, col3 = st.columns([3, 1, 1])
+        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
         
         with col1:
             st.markdown(f"""
             <div class='item-card'>
-                <div class='item-name'>{item.name}</div>
-                <span class='item-category'>{item.category}</span>
+                <div class='item-name'>{barang.nama}</div>
+                <span class='item-category'>{barang.category}</span>
                 <span class='status-badge' style='background: {bg}; color: {text}; margin-left: 12px;'>
-                    {icon} {item.quantity}
+                    {icon} {barang.jumlah}
                 </span>
             </div>
             """, unsafe_allow_html=True)
         
         with col2:
-            if st.button("✏️ Edit", key=f"edit_{item.id}"):
-                st.session_state[f"edit_{item.id}"] = True
-        
-        with col3:
-            if st.button("🗑️ Delete", key=f"del_{item.id}"):
-                inv.delete(item.id)
+            if st.button("➕", key=f"add_{barang.id}", help="Add stock"):
+                manager.tambah_stok(barang.id, 1)
                 st.rerun()
         
-        # Edit form
-        if st.session_state.get(f"edit_{item.id}", False):
-            with st.form(f"form_{item.id}"):
-                new_name = st.text_input("Name", value=item.name)
-                new_qty = st.number_input("Quantity", value=item.quantity, min_value=0)
-                new_cat = st.selectbox("Category", 
-                                      ["Electronics", "Furniture", "Stationery", "Tools", "Other"],
-                                      index=["Electronics", "Furniture", "Stationery", "Tools", "Other"].index(item.category))
-                
-                col_a, col_b = st.columns(2)
-                if col_a.form_submit_button("💾 Save"):
-                    inv.update(item.id, name=new_name, quantity=new_qty, category=new_cat)
-                    st.session_state[f"edit_{item.id}"] = False
+        with col3:
+            if st.button("➖", key=f"sub_{barang.id}", help="Remove stock"):
+                if manager.kurangi_stok(barang.id, 1):
                     st.rerun()
-                
-                if col_b.form_submit_button("❌ Cancel"):
-                    st.session_state[f"edit_{item.id}"] = False
-                    st.rerun()
+                else:
+                    st.error("Cannot reduce below 0")
+        
+        with col4:
+            if st.button("🗑️", key=f"del_{barang.id}", help="Delete"):
+                manager.inventory_repo.delete_barang(barang.id)
+                st.rerun()
 
-def render_reports(inv: InventoryManager):
+def render_reports(manager: StockManager):
     """Laporan dan statistik"""
     st.markdown("<h1>📊 Reports</h1>", unsafe_allow_html=True)
     
-    stats = inv.get_stats()
+    stats = manager.laporang_stok()
     
     # Summary
     col1, col2, col3 = st.columns(3)
-    col1.metric("📦 Total Items", stats["total"])
-    col2.metric("📊 Total Quantity", stats["quantity"])
-    col3.metric("📈 Average", f"{stats['quantity']/stats['total']:.1f}" if stats['total'] > 0 else "0")
+    col1.metric("📦 Total Items", stats["total_items"])
+    col2.metric("📊 Total Quantity", stats["total_quantity"])
+    col3.metric("📈 Average", f"{stats['total_quantity']/stats['total_items']:.1f}" if stats['total_items'] > 0 else "0")
     
     # Chart
-    if inv.items:
+    items = manager.inventory_repo.get_all()
+    if items:
         st.markdown("### 📈 Top Items by Stock")
-        df = pd.DataFrame([{"Item": i.name, "Quantity": i.quantity} for i in inv.items])
+        df = pd.DataFrame([{"Item": b.nama, "Quantity": b.jumlah} for b in items])
         df = df.sort_values("Quantity", ascending=False).head(10)
         st.bar_chart(df.set_index("Item"))
         
@@ -478,12 +526,12 @@ def render_reports(inv: InventoryManager):
         
         # Show raw data
         with st.expander("📄 View Raw CSV Data"):
-            full_df = pd.DataFrame([asdict(i) for i in inv.items])
+            full_df = pd.DataFrame([asdict(b) for b in items])
             st.dataframe(full_df, use_container_width=True)
     else:
         st.info("📦 No data to display. Add some items first!")
 
-def render_settings(inv: InventoryManager):
+def render_settings(manager: StockManager):
     """Pengaturan aplikasi"""
     st.markdown("<h1>⚙️ Settings</h1>", unsafe_allow_html=True)
     
@@ -495,8 +543,8 @@ def render_settings(inv: InventoryManager):
         st.markdown("#### 🗑️ Clear All Data")
         if st.button("Clear All Data", use_container_width=True, type="secondary"):
             if st.checkbox("⚠️ I understand this will delete all data"):
-                inv.items = []
-                inv.save()
+                manager.inventory_repo.barang_list = []
+                manager.inventory_repo._save_to_csv()
                 st.success("✅ All data cleared!")
                 st.rerun()
     
@@ -510,18 +558,18 @@ def render_settings(inv: InventoryManager):
                 ("Hammer", 20, "Tools"),
                 ("USB Cable", 3, "Electronics")
             ]
-            for name, qty, cat in demo:
-                inv.add(name, qty, cat)
+            for nama, qty, cat in demo:
+                manager.tambah_barang(nama, qty, cat)
             st.success("✅ Demo data loaded!")
             st.rerun()
     
     # File Info
     st.markdown("---")
     st.markdown("### 📁 File Information")
-    if os.path.exists(inv.file):
-        file_size = os.path.getsize(inv.file)
+    if os.path.exists(manager.inventory_repo.filename):
+        file_size = os.path.getsize(manager.inventory_repo.filename)
         st.info(f"""
-        **File:** `{inv.file}`  
+        **File:** `{manager.inventory_repo.filename}`  
         **Size:** {file_size} bytes  
         **Format:** CSV (Comma-Separated Values)  
         **Encoding:** UTF-8
@@ -541,16 +589,19 @@ def main():
     
     apply_styles()
     
-    # Initialize
-    if 'inv' not in st.session_state:
-        st.session_state.inv = InventoryManager()
+    # Initialize dengan pattern yang benar
+    if 'repository' not in st.session_state:
+        st.session_state.repository = InventoryRepository()
     
-    inv = st.session_state.inv
+    if 'manager' not in st.session_state:
+        st.session_state.manager = StockManager(st.session_state.repository)
+    
+    manager = st.session_state.manager
     
     # Sidebar
     with st.sidebar:
         st.markdown("<h1>📦 Stockify</h1>", unsafe_allow_html=True)
-        st.markdown("<p>Smart Inventory System </p>", unsafe_allow_html=True)
+        st.markdown("<p>Smart Inventory System</p>", unsafe_allow_html=True)
         st.markdown("---")
         
         page = st.radio(
@@ -568,7 +619,7 @@ def main():
         "⚙️ Settings": render_settings
     }
     
-    pages[page](inv)
+    pages[page](manager)
     
     # Footer
     st.markdown("---")
